@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 
 const MESSAGES = [
   "Searching curated venues...",
@@ -9,20 +9,21 @@ const MESSAGES = [
   "Almost ready...",
 ];
 
-export function useLoadingMessage(isLoading: boolean) {
-  const [idx, setIdx] = useState(0);
+export function useLoadingMessage(isLoading: boolean): string {
+  const [messageIndex, setMessageIndex] = useState(0);
 
   useEffect(() => {
     if (!isLoading) {
-      setIdx(0);
+      setMessageIndex(0);
       return;
     }
-    const t = setInterval(
-      () => setIdx((i) => (i + 1) % MESSAGES.length),
-      2000
-    );
-    return () => clearInterval(t);
+
+    const interval = setInterval(() => {
+      setMessageIndex((prev) => (prev + 1) % MESSAGES.length);
+    }, 2000);
+
+    return () => clearInterval(interval);
   }, [isLoading]);
 
-  return MESSAGES[idx];
+  return MESSAGES[messageIndex];
 }

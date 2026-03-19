@@ -1,48 +1,64 @@
-"use client";
+'use client';
 
-import { HistoryCard } from "./history-card";
-import type { QueryResponse } from "@/types";
+import { motion } from 'framer-motion';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Clock } from 'lucide-react';
+import { HistoryCard } from './history-card';
+import type { QueryResponse } from '@/types';
 
 interface HistorySidebarProps {
   history: QueryResponse[];
-  activeId: string | null;
-  onSelect: (id: string) => void;
-  isLoading?: boolean;
+  activeHistoryId: string | null;
+  onSelectItem: (item: QueryResponse) => void;
 }
+
+const staggerContainer = {
+  hidden:  {},
+  visible: { transition: { staggerChildren: 0.06 } },
+};
+
+const fadeUp = {
+  hidden:  { opacity: 0, y: 12 },
+  visible: { opacity: 1, y:  0, transition: { duration: 0.3 } },
+};
 
 export function HistorySidebar({
   history,
-  activeId,
-  onSelect,
-  isLoading,
+  activeHistoryId,
+  onSelectItem,
 }: HistorySidebarProps) {
   return (
-    <aside className="w-full lg:w-80 space-y-4">
-      <h2 className="text-lg font-medium text-[hsl(var(--foreground))]">
-        Recent Searches
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+        Recent searches
       </h2>
-      <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
-        {isLoading ? (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            Loading history...
-          </p>
-        ) : history.length === 0 ? (
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            No searches yet. Plan your first event!
-          </p>
+      <ScrollArea className="h-[calc(100vh-220px)]">
+        {history.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center py-8">
+            <Clock className="w-8 h-8 text-muted-foreground/40 mb-2" />
+            <p className="text-muted-foreground text-sm">No searches yet</p>
+          </div>
         ) : (
-          history.map((item) => (
-            <HistoryCard
-              key={item.id}
-              query={item.query}
-              venueName={item.proposal.venue_name}
-              timestamp={item.timestamp}
-              isActive={activeId === item.id}
-              onClick={() => onSelect(item.id)}
-            />
-          ))
+          <motion.ul
+            className="space-y-2 pr-4"
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+          >
+            {history.map((item) => (
+              <motion.li key={item.id} variants={fadeUp}>
+                <HistoryCard
+                  query={item.query}
+                  venueName={item.proposal.venue_name}
+                  timestamp={item.timestamp}
+                  isActive={activeHistoryId === item.id}
+                  onClick={() => onSelectItem(item)}
+                />
+              </motion.li>
+            ))}
+          </motion.ul>
         )}
-      </div>
-    </aside>
+      </ScrollArea>
+    </div>
   );
 }
