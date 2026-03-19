@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { Card } from "@/components/ui/card";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from 'date-fns';
+import { Card } from '@/components/ui/card';
 
 interface HistoryCardProps {
   query: string;
@@ -21,26 +21,13 @@ export function HistoryCard({
   return (
     <Card
       onClick={onClick}
-      className={`cursor-pointer transition-all hover:border-[hsl(var(--primary))]/50 hover:shadow-md p-4 gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] ${
-        isActive
-          ? "border-[hsl(var(--primary))] ring-1 ring-[hsl(var(--primary))]"
-          : "border-[hsl(var(--border))]"
+      className={`cursor-pointer transition-all hover:border-primary/50 hover:shadow-md p-4 ${
+        isActive ? 'border-primary ring-1 ring-primary' : ''
       }`}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
     >
-      <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">
-        {query}
-      </p>
-      <p className="text-sm font-medium text-[hsl(var(--foreground))] line-clamp-1">
-        {venueName}
-      </p>
-      <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
+      <p className="text-xs text-muted-foreground truncate">{query}</p>
+      <p className="text-sm font-medium line-clamp-1 mt-1">{venueName}</p>
+      <p className="text-xs text-muted-foreground mt-2">
         {formatDistanceToNow(new Date(timestamp), { addSuffix: true })}
       </p>
     </Card>

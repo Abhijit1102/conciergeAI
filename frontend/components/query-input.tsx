@@ -1,9 +1,10 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import { Loader2, Wand2 } from "lucide-react";
+import { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Wand2, Loader2 } from 'lucide-react';
 
 interface QueryInputProps {
   onSubmit: (query: string) => Promise<void>;
@@ -11,47 +12,60 @@ interface QueryInputProps {
 }
 
 export function QueryInput({ onSubmit, isLoading }: QueryInputProps) {
-  const [query, setQuery] = useState("");
-  const charCount = query.length;
-  const valid = charCount >= 10 && charCount <= 500;
+  const [query, setQuery] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const count = query.length;
+  const isOverLimit = count > 450;
+  const isDisabled = count < 10 || count > 500 || isLoading || isSubmitting;
+
+  const handleSubmit = async () => {
+    if (isDisabled) return;
+    setIsSubmitting(true);
+    try {
+      await onSubmit(query);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div className="space-y-3">
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-3"
+    >
       <Textarea
+        placeholder="Describe your event... (e.g., 'We need a venue for 200 people in NYC for a tech conference in Q2')"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder='Describe your event... e.g. "10-person leadership retreat in the mountains, 3 days, $4000 budget"'
-        rows={4}
         maxLength={500}
-        className="resize-none text-sm bg-[hsl(var(--secondary))] border-[hsl(var(--border))] focus-visible:ring-[hsl(var(--primary))] placeholder:text-[hsl(var(--muted-foreground))]"
+        rows={4}
+        className="resize-none"
       />
       <div className="flex items-center justify-between">
-        <span
-          className={`text-xs ${
-            charCount > 450 ? "text-[hsl(var(--destructive))]" : "text-[hsl(var(--muted-foreground))]"
-          }`}
-        >
-          {charCount}/500
+        <span className={`text-xs ${isOverLimit ? 'text-destructive' : 'text-muted-foreground'}`}>
+          {count}/500
         </span>
         <Button
-          onClick={() => onSubmit(query)}
-          disabled={!valid || isLoading}
+          onClick={handleSubmit}
+          disabled={isDisabled}
           size="lg"
-          className="gap-2 min-w-[160px]"
-          aria-busy={isLoading}
-          aria-label={isLoading ? "Planning..." : "Plan My Event"}
+          className="gap-2"
         >
-          {isLoading ? (
+          {isLoading || isSubmitting ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" /> Planning...
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Planning...
             </>
           ) : (
             <>
-              <Wand2 className="h-4 w-4" /> Plan My Event
+              <Wand2 className="w-4 h-4" />
+              Generate Proposal
             </>
           )}
         </Button>
       </div>
-    </div>
+    </motion.div>
   );
 }
