@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.auth.jwt import get_current_user
+from app.dependencies import require_db
 from app.models.query import Query
 from app.models.user import User
 from app.schemas.query import HistoryItem, HistoryResponse
@@ -11,14 +12,14 @@ from app.schemas.query import HistoryItem, HistoryResponse
 router = APIRouter(prefix="/history", tags=["history"])
 
 
-@router.get("", response_model=HistoryResponse)
+@router.get("", response_model=HistoryResponse, dependencies=[Depends(require_db)])
 async def get_history(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> HistoryResponse:
     """Return all queries for the authenticated user, sorted by timestamp DESC."""
     queries = (
         await Query.find(Query.user_id == current_user.id)
-        .sort([("timestamp", -1)])
+        .sort("-timestamp")
         .to_list()
     )
     items = [

@@ -1,10 +1,11 @@
 """LangGraph pipeline: parse_intent -> generate_proposal -> validate_output."""
 import json
 import re
-from typing import TypedDict, Optional
+from typing import Any, Optional, TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from app.config import get_settings
 
@@ -49,24 +50,38 @@ Required JSON format:
 Output: """
 
 
+# ── State ─────────────────────────────────────────────────────────────────────
+
 class GraphState(TypedDict):
-    """Shared state for LangGraph pipeline."""
+    """Shared state passed between LangGraph nodes."""
+    query:            str
+    parsed_intent:    dict[str, Any]
+    raw_ai_response:  str
+    venue_proposal:   Optional[dict[str, Any]]
+    retry_count:      int
+    error:            Optional[str]
 
-    query: str
-    parsed_intent: dict
-    raw_ai_response: str
-    venue_proposal: Optional[dict]
-    retry_count: int
-    error: Optional[str]
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_llm() -> ChatGoogleGenerativeAI:
     settings = get_settings()
-    return ChatGoogleGenerativeAI(
+    return ChatGoogleGenerativeAI(  # type: ignore[call-arg]
         model=settings.GEMINI_MODEL,
         google_api_key=settings.GEMINI_API_KEY,
         temperature=0.3,
     )
+
+
+def _get_content(response: Any) -> str:
+    """Safely extract string content from LLM response."""
+    content = response.content if hasattr(response, "content") else str(response)
+    if isinstance(content, list):
+        return " ".join(
+            block["text"] if isinstance(block, dict) else str(block)
+            for block in content
+        ).strip()
+    return str(content).strip()
 
 
 def _sanitize_query(query: str) -> str:
@@ -75,39 +90,40 @@ def _sanitize_query(query: str) -> str:
 
 
 def _extract_json(text: str) -> str | None:
-    """Extract JSON from LLM output (handles markdown code blocks)."""
+    """Extract JSON from LLM output, handling markdown code fences."""
     text = text.strip()
-    # Remove markdown code blocks if present
     if "```json" in text:
         start = text.find("```json") + 7
-        end = text.find("```", start)
+        end   = text.find("```", start)
         if end != -1:
             return text[start:end].strip()
     if "```" in text:
         start = text.find("```") + 3
-        end = text.find("```", start)
+        end   = text.find("```", start)
         if end != -1:
             return text[start:end].strip()
     return text
 
 
+# ── Nodes ─────────────────────────────────────────────────────────────────────
+
 def parse_intent(state: GraphState) -> GraphState:
     """Node 1: Extract structured intent from natural language query."""
     query = _sanitize_query(state["query"])
-    llm = _get_llm()
-    response = llm.invoke(PARSE_INTENT_PROMPT.format(query=query))
-    content = response.content if hasattr(response, "content") else str(response)
-    raw = content.strip()
+    llm   = _get_llm()
 
-    parsed: dict = {
-        "headcount": None,
-        "duration_days": None,
+    response = llm.invoke(PARSE_INTENT_PROMPT.format(query=query))
+    content  = _get_content(response)
+
+    parsed: dict[str, Any] = {
+        "headcount":           None,
+        "duration_days":       None,
         "location_preference": None,
-        "budget_usd": None,
-        "event_type": None,
+        "budget_usd":          None,
+        "event_type":          None,
     }
     try:
-        json_str = _extract_json(raw)
+        json_str = _extract_json(content)
         if json_str:
             parsed = json.loads(json_str)
     except json.JSONDecodeError:
@@ -120,93 +136,103 @@ def parse_intent(state: GraphState) -> GraphState:
 def generate_proposal(state: GraphState) -> GraphState:
     """Node 2: Call Gemini to generate venue proposal JSON."""
     intent = state.get("parsed_intent") or {}
-    query = state["query"]
-    llm = _get_llm()
+    llm    = _get_llm()
+
     prompt = VENUE_PROPOSAL_PROMPT.format(
-        query=query,
-        headcount=intent.get("headcount") or "N/A",
-        duration_days=intent.get("duration_days") or "N/A",
-        location_preference=intent.get("location_preference") or "N/A",
-        budget_usd=intent.get("budget_usd") or "N/A",
-        event_type=intent.get("event_type") or "N/A",
+        query               = state["query"],
+        headcount           = intent.get("headcount")           or "N/A",
+        duration_days       = intent.get("duration_days")       or "N/A",
+        location_preference = intent.get("location_preference") or "N/A",
+        budget_usd          = intent.get("budget_usd")          or "N/A",
+        event_type          = intent.get("event_type")          or "N/A",
     )
+
     response = llm.invoke(prompt)
-    content = response.content if hasattr(response, "content") else str(response)
-    state["raw_ai_response"] = content.strip()
+    state["raw_ai_response"] = _get_content(response)
     return state
 
 
 def validate_output(state: GraphState) -> GraphState:
-    """Node 3: Validate JSON schema, retry once if invalid."""
-    raw = state.get("raw_ai_response", "")
+    """Node 3: Validate JSON schema — retry once if invalid."""
+    raw         = state.get("raw_ai_response", "")
     retry_count = state.get("retry_count", 0)
 
     try:
         json_str = _extract_json(raw)
         if not json_str:
-            raise ValueError("No valid JSON found in response")
+            raise ValueError("No JSON found in AI response")
+
         data = json.loads(json_str)
+
         for field in REQUIRED_FIELDS:
             if field not in data or not data[field]:
                 raise ValueError(f"Missing or empty field: {field}")
+
         state["venue_proposal"] = data
-        state["error"] = None
+        state["error"]          = None
         return state
-    except (json.JSONDecodeError, ValueError) as e:
+
+    except (json.JSONDecodeError, ValueError) as exc:
         if retry_count < 1:
             state["retry_count"] = retry_count + 1
             return generate_proposal(state)
-        state["error"] = str(e)
+
+        state["error"]          = str(exc)
         state["venue_proposal"] = None
         return state
 
 
-def build_graph() -> StateGraph:
-    """Build the LangGraph workflow."""
+# ── Graph ─────────────────────────────────────────────────────────────────────
+
+_graph: CompiledStateGraph | None = None
+
+
+def build_graph() -> CompiledStateGraph:
+    """Compile the LangGraph workflow."""
     workflow = StateGraph(GraphState)
 
-    workflow.add_node("parse_intent", parse_intent)
+    workflow.add_node("parse_intent",      parse_intent)
     workflow.add_node("generate_proposal", generate_proposal)
-    workflow.add_node("validate_output", validate_output)
+    workflow.add_node("validate_output",   validate_output)
 
     workflow.set_entry_point("parse_intent")
-    workflow.add_edge("parse_intent", "generate_proposal")
+    workflow.add_edge("parse_intent",      "generate_proposal")
     workflow.add_edge("generate_proposal", "validate_output")
-    workflow.add_edge("validate_output", END)
+    workflow.add_edge("validate_output",   END)
 
     return workflow.compile()
 
 
-_graph = None
-
-
-def get_graph():
-    """Lazy-initialize and return the compiled graph."""
+def get_graph() -> CompiledStateGraph:
+    """Lazy-initialize and cache the compiled graph."""
     global _graph
     if _graph is None:
         _graph = build_graph()
     return _graph
 
 
-async def run_venue_pipeline(query: str) -> dict:
+# ── Public API ────────────────────────────────────────────────────────────────
+
+async def run_venue_pipeline(query: str) -> dict[str, Any]:
     """
-    Run the full LangGraph pipeline and return venue_proposal dict.
-    Raises ValueError if validation fails after retry.
+    Run the full LangGraph pipeline and return a venue_proposal dict.
+    Raises ValueError if validation fails after one retry.
     """
-    sanitized = _sanitize_query(query)
     initial_state: GraphState = {
-        "query": sanitized,
-        "parsed_intent": {},
+        "query":           _sanitize_query(query),
+        "parsed_intent":   {},
         "raw_ai_response": "",
-        "venue_proposal": None,
-        "retry_count": 0,
-        "error": None,
+        "venue_proposal":  None,
+        "retry_count":     0,
+        "error":           None,
     }
-    graph = get_graph()
-    result = await graph.ainvoke(initial_state)
+
+    result = await get_graph().ainvoke(initial_state)
 
     if result.get("error") or not result.get("venue_proposal"):
         raise ValueError(
-            result.get("error") or "AI could not generate a valid response. Please try again."
+            result.get("error")
+            or "AI could not generate a valid response. Please try again."
         )
+
     return result["venue_proposal"]

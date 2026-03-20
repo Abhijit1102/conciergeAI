@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { loginSchema } from '@/lib/validations';
-import { login } from '@/lib/api';
+import { Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api/v1';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,17 +26,30 @@ export default function LoginPage() {
     try {
       const validation = loginSchema.safeParse(formData);
       if (!validation.success) {
-        setError(validation.error.errors[0].message);
-        setIsLoading(false);
+        setError(validation.error.issues[0]?.message ?? 'Invalid input');
         return;
       }
 
-      const response = await login(formData);
-      localStorage.setItem('access_token', response.access_token);
-      localStorage.setItem('username', response.user.username);
+      const res = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.detail ?? 'Login failed. Please try again.');
+        return;
+      }
+
+      localStorage.setItem('access_token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      localStorage.setItem('username', data.user.username);
+
       router.push('/');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed. Please try again.');
+    } catch {
+      setError('Network error. Please try again.');
     } finally {
       setIsLoading(false);
     }

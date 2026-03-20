@@ -1,10 +1,10 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { QueryResponse } from '@/types';
+import { motion } from 'framer-motion';
 import { Clock } from 'lucide-react';
 import { HistoryCard } from './history-card';
-import type { QueryResponse } from '@/types';
 
 interface HistorySidebarProps {
   history: QueryResponse[];
@@ -13,13 +13,13 @@ interface HistorySidebarProps {
 }
 
 const staggerContainer = {
-  hidden:  {},
+  hidden: {},
   visible: { transition: { staggerChildren: 0.06 } },
 };
 
 const fadeUp = {
-  hidden:  { opacity: 0, y: 12 },
-  visible: { opacity: 1, y:  0, transition: { duration: 0.3 } },
+  hidden: { opacity: 0, y: 12 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
 export function HistorySidebar({
@@ -45,11 +45,11 @@ export function HistorySidebar({
             initial="hidden"
             animate="visible"
           >
-            {history.map((item) => (
-              <motion.li key={item.id} variants={fadeUp}>
+            {history.map((item, index) => (
+              <motion.li key={item.id ?? `history-item-${index}`} variants={fadeUp}>
                 <HistoryCard
                   query={item.query}
-                  venueName={item.proposal.venue_name}
+                  venueName={item.proposal?.venue_name}
                   timestamp={item.timestamp}
                   isActive={activeHistoryId === item.id}
                   onClick={() => onSelectItem(item)}

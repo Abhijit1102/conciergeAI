@@ -55,9 +55,15 @@ JWT_SECRET=your-minimum-32-character-secret-here   # min 32 chars
 
 | Variable         | Required | Notes                                                                     |
 | ---------------- | :------: | ------------------------------------------------------------------------- |
-| `MONGODB_URL`    |    ✅    | Local or MongoDB Atlas connection string                                  |
+| `MONGODB_URL`    |    ✅    | Local (`mongodb://localhost:27017`) or [MongoDB Atlas](https://cloud.mongodb.com) connection string |
 | `GEMINI_API_KEY` |    ✅    | [console.cloud.google.com](https://console.cloud.google.com) → Gemini API |
 | `JWT_SECRET`     |    ✅    | Minimum 32 random characters                                              |
+| `SKIP_MONGODB`   |    —     | Set `true` to run without MongoDB (auth/query/history return 503; useful when DB isn't available)  |
+
+**MongoDB not running?**  
+- Install locally: [MongoDB Community](https://www.mongodb.com/docs/manual/installation/)  
+- Or use [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) (free tier) and set `MONGODB_URL`  
+- Or set `SKIP_MONGODB=true` to start the server anyway (API docs at `/docs` will work)
 
 ### 2 · Install dependencies
 

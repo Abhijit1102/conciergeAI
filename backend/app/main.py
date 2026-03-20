@@ -20,13 +20,38 @@ from app.api.history import router as history_router
 async def lifespan(app: FastAPI):
     """Initialize MongoDB connection and Beanie on startup."""
     settings = get_settings()
-    client = AsyncIOMotorClient(settings.MONGODB_URL)
-    await init_beanie(
-        database=client[settings.DB_NAME],
-        document_models=[User, Query],
-    )
+    app.state.db_ready = False
+
+    if settings.SKIP_MONGODB:
+        import sys
+        print("WARNING: SKIP_MONGODB=true — API will return 503 for auth/query/history.", file=sys.stderr)
+        yield
+        return
+
+    try:
+        client = AsyncIOMotorClient(settings.MONGODB_URL, serverSelectionTimeoutMS=5000)
+        await init_beanie(
+            database=client[settings.DB_NAME],
+            document_models=[User, Query],
+        )
+        app.state.db_ready = True
+        app.state._mongo_client = client
+    except Exception as e:
+        import sys
+        print(
+            "\n" + "=" * 60 + "\n"
+            "MongoDB connection failed. Start MongoDB or set SKIP_MONGODB=true.\n"
+            f"  Error: {e}\n"
+            "  Docs: https://www.mongodb.com/docs/manual/installation/\n"
+            "  Or use MongoDB Atlas (free): https://www.mongodb.com/cloud/atlas\n"
+            "=" * 60,
+            file=sys.stderr,
+        )
+        raise
+
     yield
-    client.close()
+    if getattr(app.state, "_mongo_client", None):
+        app.state._mongo_client.close()
 
 
 app = FastAPI(

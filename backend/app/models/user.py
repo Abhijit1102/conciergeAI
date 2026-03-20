@@ -1,15 +1,21 @@
+# app/models/user.py
 """User model for MongoDB."""
-from beanie import Document, Indexed
+from typing import Optional
+from beanie import Document
 from pydantic import EmailStr, Field
+from pymongo import IndexModel, ASCENDING
 
 
 class User(Document):
     """User document with username, email, and hashed password."""
 
-    username: Indexed(str, unique=True)
-    email: Indexed(EmailStr, unique=True)
+    username: str
+    email: EmailStr
     hashed_password: str
 
     class Settings:
         name = "users"
-        indexes = []
+        indexes = [
+            IndexModel([("username", ASCENDING)], unique=True),
+            IndexModel([("email", ASCENDING)], unique=True),
+        ]

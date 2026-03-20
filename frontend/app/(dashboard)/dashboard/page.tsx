@@ -1,18 +1,28 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { AppHeader } from '@/components/app-header';
+import { HistorySidebar } from '@/components/history-sidebar';
+import { LoadingSkeleton } from '@/components/loading-skeleton';
+import { QueryInput } from '@/components/query-input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { AppHeader } from '@/components/app-header';
-import { QueryInput } from '@/components/query-input';
 import { VenueCard } from '@/components/venue-card';
-import { LoadingSkeleton } from '@/components/loading-skeleton';
-import { HistorySidebar } from '@/components/history-sidebar';
-import { useConcierge } from '@/store/use-concierge';
 import { useLoadingMessage } from '@/hooks/use-loading-message';
-import { submitQuery, getHistory } from '@/lib/api';
+import { useConcierge } from '@/store/use-concierge';
 import type { QueryResponse } from '@/types';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+
+const API = process.env.NEXT_PUBLIC_API_URL;
+
+/**
+ * 🔥 Normalize API response shape
+ */
+const normalize = (data: any): QueryResponse => ({
+  ...data,
+  id: data.id,
+  proposal: data.proposal ?? data.venue_proposal,
+});
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -35,7 +45,7 @@ export default function DashboardPage() {
 
   const loadingMessage = useLoadingMessage(isLoading);
 
-  // Check auth and load history on mount
+  // ── Auth check + load history ────────────────────────────────────────────────
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (!token) {
@@ -43,17 +53,30 @@ export default function DashboardPage() {
       return;
     }
 
-    // Extract username from localStorage (would come from login response)
-    const storedUsername = localStorage.getItem('username');
-    setUsername(storedUsername || undefined);
+    setUsername(localStorage.getItem('username') ?? undefined);
 
-    // Load history
     (async () => {
       try {
-        const historyData = await getHistory();
-        setHistory(historyData.items);
-      } catch (err) {
-        // Silent failure - show empty state
+        const res = await fetch(`${API}/history`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.status === 401) {
+          router.push('/login');
+          return;
+        }
+
+        const data = await res.json();
+
+        const normalizedHistory = (data.items ?? []).map((item: any) => {
+          if (!item.id) {
+            console.warn('History item missing id:', item);
+          }
+          return normalize(item);
+        });
+
+        setHistory(res.ok ? normalizedHistory : []);
+      } catch {
         setHistory([]);
       } finally {
         setIsInitialized(true);
@@ -61,31 +84,56 @@ export default function DashboardPage() {
     })();
   }, [router, setHistory]);
 
+  // ── Submit query ─────────────────────────────────────────────────────────────
   const handleSubmitQuery = async (query: string) => {
     setLoading(true);
     setError(null);
     setCurrentResult(null);
 
     try {
-      const response = await submitQuery({ query });
+      const token = localStorage.getItem('access_token');
+
+      const res = await fetch(`${API}/query`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token ?? ''}`,
+        },
+        body: JSON.stringify({ query }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        const message =
+          res.status === 502 || res.status === 504
+            ? 'AI could not respond. Please try again.'
+            : res.status === 401
+              ? 'Session expired. Please log in again.'
+              : data.detail ?? 'Failed to generate proposal. Please try again.';
+
+        setError(message);
+
+        if (res.status === 401) router.push('/login');
+        return;
+      }
+
+      const response = normalize(data);
+
       setCurrentResult(response);
       prependHistory(response);
       setActiveHistoryId(response.id);
-    } catch (err: any) {
-      const errorMessage =
-        err.response?.status === 502 || err.response?.status === 504
-          ? 'AI could not respond. Please try again.'
-          : err.message === 'Network Error'
-          ? 'Connection error. Check your network.'
-          : 'Failed to generate proposal. Please try again.';
-      setError(errorMessage);
+    } catch {
+      setError('Connection error. Check your network.');
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Logout ───────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     localStorage.removeItem('username');
     router.push('/login');
   };
@@ -106,11 +154,14 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-background">
       <AppHeader username={username} onLogout={handleLogout} />
+
       <main className="max-w-6xl mx-auto px-4 py-8">
         <div className="flex flex-col lg:flex-row gap-8">
-          {/* Left column - Query and Results */}
+
+          {/* Left column */}
           <div className="flex-1 space-y-6">
             <QueryInput onSubmit={handleSubmitQuery} isLoading={isLoading} />
+
             <div aria-live="polite" role="status">
               {isLoading && (
                 <>
@@ -120,9 +171,11 @@ export default function DashboardPage() {
                   </p>
                 </>
               )}
-              {!isLoading && currentResult && (
+
+              {!isLoading && currentResult && currentResult.proposal && (
                 <VenueCard {...currentResult.proposal} />
               )}
+
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
@@ -131,10 +184,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Separator for desktop */}
           <Separator orientation="vertical" className="hidden lg:block h-auto" />
 
-          {/* Right column - History Sidebar (Desktop only) */}
+          {/* Right column - History */}
           <aside className="w-full lg:w-80 hidden lg:block">
             <HistorySidebar
               history={history}
@@ -144,22 +196,26 @@ export default function DashboardPage() {
           </aside>
         </div>
 
-        {/* Mobile History - shown as flat list below on small screens */}
+        {/* Mobile history */}
         {history.length > 0 && (
           <div className="lg:hidden mt-8 pt-8 border-t border-border">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
               Recent searches
             </h2>
+
             <div className="space-y-2">
-              {history.map((item) => (
+              {history.map((item, index) => (
                 <div
-                  key={item.id}
+                  key={item.id ?? `history-item-${index}`}
                   onClick={() => handleSelectHistory(item)}
                   className="p-4 rounded-lg border border-border cursor-pointer hover:border-primary/50 transition-all"
                 >
-                  <p className="text-xs text-muted-foreground truncate">{item.query}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {item.query}
+                  </p>
+
                   <p className="text-sm font-medium line-clamp-1 mt-1">
-                    {item.proposal.venue_name}
+                    {item.proposal?.venue_name ?? 'No venue'}
                   </p>
                 </div>
               ))}

@@ -35,10 +35,10 @@ class VenueProposal(BaseModel):
 class QueryResponse(BaseModel):
     """POST /query response."""
 
-    venue_proposal: VenueProposal
+    id: str | None = None
     query: str
+    venue_proposal: VenueProposal
     timestamp: datetime
-
 
 class HistoryItem(BaseModel):
     """Single history entry for GET /history."""

@@ -1,21 +1,43 @@
-"""Auth endpoints: register, login."""
-from fastapi import APIRouter, HTTPException, status
+# app/api/auth.py
+"""Auth endpoints: register, login, refresh."""
+from fastapi import APIRouter, Depends, HTTPException, status
+from jose import JWTError, jwt
 
-from app.auth.jwt import create_access_token, hash_password, verify_password
+from app.auth.jwt import (
+    create_access_token,
+    create_refresh_token,
+    hash_password,
+    verify_password,
+)
+from app.config import get_settings
+from app.dependencies import require_db
 from app.models.user import User
-from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest
+from app.schemas.auth import LoginRequest, RegisterRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register")
-async def register(data: RegisterRequest) -> dict:
-    """Register a new user with username, email, password."""
+# =======================
+# Register
+# =======================
+
+@router.post("/register", dependencies=[Depends(require_db)])
+async def register(data: RegisterRequest):
+    email = data.email.lower().strip()
+    username = data.username.strip()
+
+    if len(data.password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 8 characters long",
+        )
+
     existing = await User.find_one(
-        {"$or": [{"email": data.email}, {"username": data.username}]}
+        {"$or": [{"email": email}, {"username": username}]}
     )
+
     if existing:
-        if existing.email == data.email:
+        if existing.email == email:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="An account with this email already exists.",
@@ -24,28 +46,80 @@ async def register(data: RegisterRequest) -> dict:
             status_code=status.HTTP_409_CONFLICT,
             detail="Username already taken.",
         )
+
     user = User(
-        username=data.username,
-        email=data.email,
+        username=username,
+        email=email,
         hashed_password=hash_password(data.password),
     )
+
     await user.insert()
-    return {"message": "Registration successful", "user_id": str(user.id)}
+
+    return {
+        "message": "Registration successful",
+        "user_id": str(user.id),
+    }
 
 
-@router.post("/login", response_model=LoginResponse)
-async def login(data: LoginRequest) -> LoginResponse:
-    """Login with email + password, receive JWT."""
-    user = await User.find_one({"email": data.email})
+# =======================
+# Login
+# =======================
+
+@router.post("/login", dependencies=[Depends(require_db)])
+async def login(data: LoginRequest):
+    email = data.email.lower().strip()
+
+    user = await User.find_one({"email": email})
+
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
         )
-    token = create_access_token(str(user.id), user.username)
-    return LoginResponse(
-        access_token=token,
-        token_type="bearer",
-        user_id=str(user.id),
-        username=user.username,
-    )
+
+    access_token = create_access_token(str(user.id), user.username)
+    refresh_token = create_refresh_token(str(user.id))
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+        },
+    }
+
+
+# =======================
+# Refresh Token
+# =======================
+
+@router.post("/refresh")
+async def refresh_token(refresh_token: str):
+    settings = get_settings()
+
+    try:
+        payload = jwt.decode(
+            refresh_token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+
+        user_id = payload.get("sub")
+
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    from beanie import PydanticObjectId
+    user = await User.get(PydanticObjectId(user_id))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    new_access_token = create_access_token(str(user.id), user.username)
+
+    return {"access_token": new_access_token}
